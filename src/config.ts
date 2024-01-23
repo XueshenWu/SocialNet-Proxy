@@ -1,0 +1,40 @@
+
+import type { ProxyConfig, TokenConfig, FileConfig, Config } from './types/config';
+
+const TOKEN_CONFIG: TokenConfig = {
+    auth: {
+        SECRET: "auth_secret",
+        expire_seconds: 60 * 30
+    },
+    refresh: {
+        SECRET: "refresh_secret",
+        expire_seconds: 60 * 60 * 24 * 3
+    }
+}
+
+const PROXY_CONFIG: ProxyConfig = [
+    {
+        service: "api",
+        serverGroup: [
+            {
+                server: "http://localhost:8000",
+                weight: 1
+            }
+        ],
+        timeout: 5000
+    }
+]
+
+const FILE_CONFIG: FileConfig = {
+    path: "http://localhost:9876"
+}
+
+const CONFIG: Config = {
+    proxy_c: PROXY_CONFIG,
+    token_c: TOKEN_CONFIG,
+    file_c: FILE_CONFIG
+}
+
+
+export default CONFIG;
+export { TOKEN_CONFIG, PROXY_CONFIG, FILE_CONFIG };
