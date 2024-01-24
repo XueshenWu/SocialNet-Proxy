@@ -5,7 +5,7 @@ import {relay_stream} from '../services/proxytunnel.service';
 
 const fileRouter = express.Router();
 
-// fileRouter.use(authGate);
+fileRouter.use(authGate);
 
 fileRouter.all('/:bucket/:key', express.raw({
     type: () => true,

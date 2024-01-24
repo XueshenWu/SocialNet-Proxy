@@ -409,7 +409,7 @@ class MinRTTScheduler extends MaxHeapScheduler {
             this.heap = new ServerHeap(alive_servers);
             this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
                 this.updateAlive();
-            }, Math.max(this.scheduleGroup.timeout, 5) * 1000) : undefined;
+            }, Math.max(this.scheduleGroup.timeout, 60*3) * 1000) : undefined;
             this.heap = new ServerHeap(alive_servers);
         }
     }

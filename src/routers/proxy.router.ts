@@ -3,8 +3,11 @@ import { AbstractServerScheduler } from '../services/scheduler.service';
 import { PROXY_CONFIG } from '../config';
 import { schedulerFactory } from '../services/scheduler.service';
 import {relay_json} from '../services/proxytunnel.service';
+import authGate from '../services/authgate.middleware';
 
 const proxyRouter = express.Router();
+
+proxyRouter.use(authGate);
 
 const proxyRoutes = new Map<string, AbstractServerScheduler>();
 

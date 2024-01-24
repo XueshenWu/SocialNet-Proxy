@@ -1,5 +1,5 @@
 type TokenPayload = {
-    userid: string;
+    email: string;
     kind:"AUTH"|"REFRESH";
 }
 

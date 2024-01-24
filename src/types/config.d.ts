@@ -18,7 +18,7 @@ type ProxyConfig = Array<{
     timeout?: number;
 
     scheduleStrategy: ScheduleStrategy;
-    
+
 
 }>
 
@@ -26,10 +26,15 @@ type TokenConfig = {
     auth: {
         SECRET: string;
         expire_seconds: number;
+        location: string;
     },
     refresh: {
         SECRET: string;
         expire_seconds: number;
+        
+    },
+    signup:{
+        location: string;
     }
 }
 
@@ -45,4 +50,4 @@ type Config = {
     file_c: FileConfig;
 }
 
-export type { Config, ProxyConfig, TokenConfig, FileConfig , ScheduleStrategy, Server};
+export type { Config, ProxyConfig, TokenConfig, FileConfig, ScheduleStrategy, Server };

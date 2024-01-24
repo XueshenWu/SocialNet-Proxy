@@ -3,8 +3,9 @@ import express from 'express';
 import {verify_refresh_tokens} from './token.service';
 
 export default function authGate(req: express.Request, resp: express.Response, next: express.NextFunction){
-    const auth_token = req.headers['X-Auth-Token'] as string;
-    const refresh_token = req.headers['X-Refresh-Token'] as string;
+    const auth_token = req.headers['x-auth-token'] as string;
+    const refresh_token = req.headers['x-refresh-token'] as string;
+    
     if (auth_token && refresh_token){
         
         const tokens = verify_refresh_tokens({auth: auth_token, refresh: refresh_token});

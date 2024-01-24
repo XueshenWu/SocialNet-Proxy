@@ -4,11 +4,16 @@ import type { ProxyConfig, TokenConfig, FileConfig, Config } from './types/confi
 const TOKEN_CONFIG: TokenConfig = {
     auth: {
         SECRET: "auth_secret",
-        expire_seconds: 60 * 30
+        expire_seconds: 60 * 30,
+        location:"http://localhost:3004/auth",
+       
     },
     refresh: {
         SECRET: "refresh_secret",
-        expire_seconds: 60 * 60 * 24 * 3
+        expire_seconds: 60 * 60 * 24 * 3,
+    },
+    signup:{
+        location: "http://localhost:3004/signup"
     }
 }
 
@@ -27,7 +32,7 @@ const PROXY_CONFIG: ProxyConfig = [
                 weight: 1
             }
         ],
-        timeout: 5,
+        timeout: 1800,
         scheduleStrategy: "MIN_AVG_RTT"
     }
 ]
