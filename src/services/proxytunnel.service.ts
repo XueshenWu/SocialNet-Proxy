@@ -1,23 +1,32 @@
 import { Request, Response } from "express";
 import { Readable } from "stream";
 
-export default async function relay(req: Request, resp: Response, target: string, method: "GET" | "POST" | "PUT" | "DELETE") {
+export async function relay_stream(req: Request, resp: Response, target: string, method: "GET" | "POST" | "PUT" | "DELETE") {
+
+
     let target_response: globalThis.Response;
 
 
-    let headers:any = {};
+    let headers: any = {};
     Object.entries(req.headers).forEach(([key, value]) => {
         if (value !== undefined) {
             headers[key] = Array.isArray(value) ? value.join(', ') : value;
         }
     });
-    
 
+
+    
     target_response = await fetch(target, {
         method: method,
-        headers:headers,
+        headers: headers,
         body: method === "GET" ? undefined : req.body
     });
+
+    
+
+ 
+   
+
     const status = target_response.status;
 
     resp.status(status);
@@ -25,7 +34,7 @@ export default async function relay(req: Request, resp: Response, target: string
     if (status >= 200 && status < 300) {
 
         const binary = await target_response.arrayBuffer();
-        // resp.write(Buffer.from(binary));
+
         const stream = new Readable()
         stream.push(Buffer.from(binary))
         stream.push(null)
@@ -36,4 +45,38 @@ export default async function relay(req: Request, resp: Response, target: string
 
     resp.end();
 
+
+}
+
+
+export async function relay_json(req: Request, resp: Response, target: string, method: "GET" | "POST" | "PUT" | "DELETE") {
+
+    let target_response: globalThis.Response;
+    target_response = await fetch(target, {
+        method: method,
+        body: method === "GET" ? undefined : JSON.stringify(req.body),
+       
+    });
+
+
+    const status = target_response.status;
+
+   
+   
+    if(status >= 200 && status < 300){
+        try{
+            const json = await target_response.json();
+            resp.json(json);
+        }catch(e){
+
+            const res = await target_response.text();
+            
+            resp.status(status).end(res);
+        }
+        
+        
+    
+    }else{
+        resp.status(status).end();
+    }
 }

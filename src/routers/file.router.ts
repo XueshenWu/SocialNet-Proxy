@@ -1,7 +1,7 @@
 import express from 'express';
 import { FILE_CONFIG } from '../config';
 import authGate from '../services/authgate.middleware';
-import relay from '../services/proxytunnel.service';
+import {relay_stream} from '../services/proxytunnel.service';
 
 const fileRouter = express.Router();
 
@@ -20,7 +20,12 @@ fileRouter.all('/:bucket/:key', express.raw({
         res.status(404).end();
         return;
     }
-    relay(req, res, target, method as "GET" | "POST" | "PUT" | "DELETE");
+    try{
+        relay_stream(req, res, target, method as "GET" | "POST" | "PUT" | "DELETE");
+    }catch(e){
+        res.status(502).end()
+    }
+    
 })
 
 

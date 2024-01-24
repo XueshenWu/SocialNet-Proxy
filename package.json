@@ -16,6 +16,8 @@
     "express": "^4.18.2"
   },
   "dependencies": {
-    "jsonwebtoken": "^9.0.2"
+    "@types/winston": "^2.4.4",
+    "jsonwebtoken": "^9.0.2",
+    "winston": "^3.11.0"
   }
 }

@@ -1,14 +1,24 @@
 
+type ScheduleStrategy = "SINGLETON" | "ROUND_ROBIN" | "MIN_AVG_RTT" | "WEIGHTED_RANDOM"
+
+type Server = {
+
+    location: string;
+    weight: number;
+
+}
+
+
 type ProxyConfig = Array<{
 
     service: string;
 
-    serverGroup: Array<{
-        server: string;
-        weight: number;
-    }>;
+    serviceProvider: Server[]
 
     timeout?: number;
+
+    scheduleStrategy: ScheduleStrategy;
+    
 
 }>
 
@@ -35,4 +45,4 @@ type Config = {
     file_c: FileConfig;
 }
 
-export type {Config, ProxyConfig, TokenConfig, FileConfig};
+export type { Config, ProxyConfig, TokenConfig, FileConfig , ScheduleStrategy, Server};

@@ -3,11 +3,12 @@ import { test_connection } from "./connection.util";
 import type { ProxyConfig } from "../types/config";
 import type { ScheduleStrategy } from "../types/config"
 import type { Server } from "../types/config";
+import {logger} from './logger.service';
 
 export abstract class AbstractServerScheduler {
 
 
-    abstract next(): ScheduableServer;
+    abstract next(): { server: string, profile: (stat: number) => void };
     abstract add(server: ScheduableServer): void;
     abstract remove(server: ScheduableServer): void;
     abstract forEach(fn: (server: ScheduableServer) => void): void;
@@ -46,10 +47,14 @@ class SINGLETONScheduler extends AbstractServerScheduler {
         super();
         this.scheduleGroup = scheduleGroup;
         this.server = scheduleGroup.servers[0];
+        this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
+            this.updateAlive();
+        }, 0) : undefined;
     }
 
-    next(): ScheduableServer {
-        return this.server;
+    next(): { server: string, profile: (stat: number) => void } {
+        const server = this.server;
+        return { server: server.location, profile: (stat: number) => { server.serveTime++ } };
     }
 
     add(server: ScheduableServer): void {
@@ -85,7 +90,7 @@ abstract class LinearScheduler extends AbstractServerScheduler {
         this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
             this.updateAlive();
         },
-            Math.max(this.scheduleGroup.timeout, 60 * 3) * 1000) : undefined;
+            0) : undefined;
     }
     protected async updateAlive(): Promise<void> {
 
@@ -139,7 +144,7 @@ abstract class LinearScheduler extends AbstractServerScheduler {
         this.alive_servers.forEach(fn);
     }
 
-    abstract next(): ScheduableServer;
+    abstract next(): { server: string, profile: (stat: number) => void };
 
 }
 
@@ -155,12 +160,16 @@ class RoundRobinScheduler extends LinearScheduler {
 
 
 
-    next(): ScheduableServer {
+    next(): { server: string, profile: (stat: number) => void } {
         if (this.alive_servers.length === 0) {
             throw new Error("No server available");
         } else {
             this.index = (this.index + 1) % this.alive_servers.length;
-            return this.alive_servers[this.index];
+            const server = this.alive_servers[this.index];
+            return {
+                server: server.location,
+                profile: (stat: number) => { server.serveTime++ }
+            }
         }
     }
 
@@ -214,7 +223,7 @@ class WeightedRandomScheduler extends LinearScheduler {
 
     }
 
-    next(): ScheduableServer {
+    next(): { server: string, profile: (stat: number) => void } {
         if (this.alive_servers.length === 0) {
             throw new Error("No server available");
         } else {
@@ -223,10 +232,18 @@ class WeightedRandomScheduler extends LinearScheduler {
             for (let i = 0; i < this.alive_servers.length; i++) {
                 sum += this.alive_servers[i].getWeight();
                 if (rand < sum) {
-                    return this.alive_servers[i];
+                    const server = this.alive_servers[i];
+                    return {
+                        server: server.location,
+                        profile: (stat: number) => { server.serveTime++ }
+                    }
                 }
             }
-            return this.alive_servers[this.alive_servers.length - 1];
+            const server = this.alive_servers[this.alive_servers.length - 1];
+            return {
+                server: server.location,
+                profile: (stat: number) => { server.serveTime++ }
+            }
         }
     }
 
@@ -358,15 +375,21 @@ class MinRTTScheduler extends MaxHeapScheduler {
         const servers: ScheduableServer[] = scheduleGroup.servers;
         this.heap = new ServerHeap(servers);
 
+
+
         this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
+            logger.info(`Set Update alive servers for ${this.scheduleGroup.service} at constructor`);
             this.updateAlive();
-        }, Math.max(this.scheduleGroup.timeout, 60 * 10) * 1000) : undefined;
+        }, 0) : undefined;
     }
 
     protected async updateAlive(): Promise<void> {
+        
         if (this.scheduleGroup.timeout === undefined) {
+            logger.info(`No timeout for ${this.scheduleGroup.service}`);
             return;
         }
+        logger.info(`Update alive servers for ${this.scheduleGroup.service}`);
         clearTimeout(this.timeoutHandler);
         const servers: ScheduableServer[] = this.scheduleGroup.servers;
         const alive_servers: ScheduableServer[] = [];
@@ -377,22 +400,30 @@ class MinRTTScheduler extends MaxHeapScheduler {
             }
         }
 
-
+        logger.info(`Alive servers for ${this.scheduleGroup.service} ${alive_servers.map((s) => s.location).join(",")}`);
         if (alive_servers.length === 0) {
             this.timeoutHandler = setTimeout(() => {
                 this.updateAlive();
-            }, 10 * 1000)
+            }, 5 * 1000)
         } else {
             this.heap = new ServerHeap(alive_servers);
             this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
                 this.updateAlive();
-            }, Math.max(this.scheduleGroup.timeout, 60 * 10) * 1000) : undefined;
+            }, Math.max(this.scheduleGroup.timeout, 5) * 1000) : undefined;
             this.heap = new ServerHeap(alive_servers);
         }
     }
 
-    next(): ScheduableServer {
-        return this.heap.pop();
+    next(): { server: string, profile: (stat: number) => void } {
+        const server = this.heap.pop();
+        return {
+            server: server.location,
+            profile: (stat: number) => {
+                server.serveTime++;
+                server.setWeight((server.weight + stat + 1) / (server.serveTime + 1));
+                this.heap.add(server);
+            }
+        }
     }
     add(server: ScheduableServer): void {
         this.heap.add(server);
@@ -424,7 +455,8 @@ export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServe
             ...server,
             id: Symbol(),
             getWeight: mapGetWeightFunction[proxyRoute.scheduleStrategy](server),
-            setWeight: (weight) => { server.weight = weight; }
+            setWeight: (weight) => { server.weight = weight; },
+            serveTime: 0
         })),
         timeout: proxyRoute.timeout
     }
@@ -442,33 +474,41 @@ export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServe
     }
 }
 
-const proxyConfig:ProxyConfig = [
+// const proxyConfig: ProxyConfig = [
 
-]
+// ]
 
-const serviceProvider:Server[] = []
+// const serviceProvider: Server[] = []
 
-for(let i=0; i< 100; i++){
-   serviceProvider.push({
-         location: `http://localhost:${i}`,
-         weight:Math.floor(Math.random()*1000)
+// for (let i = 0; i < 100; i++) {
+//     serviceProvider.push({
+//         location: `http://localhost:${i}`,
+//         weight: Math.floor(Math.random() * 1000)
 
-   })
-}
+//     })
+// }
 
-proxyConfig.push({
-    service:"test",
-    serviceProvider,
-    scheduleStrategy:"MIN_AVG_RTT"
-})
-const scheduler = schedulerFactory(proxyConfig[0]);
+// proxyConfig.push({
+//     service: "test",
+//     serviceProvider,
+//     scheduleStrategy: "MIN_AVG_RTT"
+// })
+// const scheduler = schedulerFactory(proxyConfig[0]);
+// const test = async () =>{
+// try {
+//     while (true) {
+//         const {server, profile} = scheduler.next();
+//         console.log(`Request to ${server}`);
+//         profile(Math.floor(Math.random() * 1000));
+//         await new Promise((resolve) => {
+//             setTimeout(resolve, 300);
+//         })
+//     }
+// } catch (e) {
 
-try{
-    while(true){
-        console.log(scheduler.next().weight);
-    }
-}catch(e){
+// }
+// }
 
-}
+// test();
 
 

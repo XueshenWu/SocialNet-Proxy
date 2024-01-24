@@ -15,13 +15,20 @@ const TOKEN_CONFIG: TokenConfig = {
 const PROXY_CONFIG: ProxyConfig = [
     {
         service: "api",
-        serverGroup: [
+        serviceProvider: [
             {
-                server: "http://localhost:8000",
+                location: "http://localhost:3001",
+                weight: 1
+            },{
+                location: "http://localhost:3002",
+                weight: 1
+            },{
+                location: "http://localhost:3003",
                 weight: 1
             }
         ],
-        timeout: 5000
+        timeout: 5,
+        scheduleStrategy: "MIN_AVG_RTT"
     }
 ]
 
