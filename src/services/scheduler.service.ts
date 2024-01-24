@@ -1,49 +1,107 @@
-import type { Server, ServerGroup } from "../types/server-scheduler";
+import type { ScheduableServer, ScheduleGroup } from "../types/scheduler";
 import { test_connection } from "./connection.util";
+import type { ProxyConfig } from "../types/config";
+import type { ScheduleStrategy } from "../types/config"
+import type { Server } from "../types/config";
 
-abstract class AbstractServerScheduler {
+export abstract class AbstractServerScheduler {
 
 
-    abstract next(): Server;
-    abstract add(server: Server): void;
-    abstract remove(server: Server): void;
-    abstract forEach(fn: (server: Server) => void): void;
+    abstract next(): ScheduableServer;
+    abstract add(server: ScheduableServer): void;
+    abstract remove(server: ScheduableServer): void;
+    abstract forEach(fn: (server: ScheduableServer) => void): void;
+
+}
+
+
+class SINGLETONScheduler extends AbstractServerScheduler {
+    private readonly scheduleGroup: ScheduleGroup;
+    private server: ScheduableServer;
+
+
+    private timeoutHandler?: NodeJS.Timeout;
+    private async updateAlive(): Promise<void> {
+        if (this.scheduleGroup.timeout === undefined) {
+            return;
+        }
+        clearTimeout(this.timeoutHandler);
+        const singleton: ScheduableServer = this.scheduleGroup.servers[0];
+        if (await test_connection(singleton.location)) {
+            this.server = singleton;
+
+            this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
+                this.updateAlive();
+            },
+                Math.max(this.scheduleGroup.timeout,) * 1000) : undefined;
+        } else {
+            this.timeoutHandler = setTimeout(() => {
+                this.updateAlive();
+            }, 10 * 1000);
+        }
+    }
+
+
+    constructor(scheduleGroup: ScheduleGroup) {
+        super();
+        this.scheduleGroup = scheduleGroup;
+        this.server = scheduleGroup.servers[0];
+    }
+
+    next(): ScheduableServer {
+        return this.server;
+    }
+
+    add(server: ScheduableServer): void {
+        this.server = server;
+    }
+
+    remove(server: ScheduableServer): void {
+        if (this.server.id === server.id) {
+            this.server = this.scheduleGroup.servers[0];
+        }
+    }
+
+    forEach(fn: (server: ScheduableServer) => void): void {
+        fn(this.server);
+    }
+
 
 }
 
 abstract class LinearScheduler extends AbstractServerScheduler {
-    protected readonly serverGroup: ServerGroup;
+    protected readonly scheduleGroup: ScheduleGroup;
     protected index: number;
     protected timeoutHandler?: NodeJS.Timeout;
 
-    protected alive_servers: Server[];
+    protected alive_servers: ScheduableServer[];
 
-    constructor(serverGroup: ServerGroup) {
+    constructor(scheduleGroup: ScheduleGroup) {
         super();
-        this.serverGroup = serverGroup;
+        this.scheduleGroup = scheduleGroup;
         this.alive_servers = [];
         this.index = 0;
         this.updateAlive();
-        this.timeoutHandler = this.serverGroup.timeout ? setTimeout(() => {
+        this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
             this.updateAlive();
         },
-            Math.max(this.serverGroup.timeout, 60 * 3) * 1000) : undefined;
+            Math.max(this.scheduleGroup.timeout, 60 * 3) * 1000) : undefined;
     }
     protected async updateAlive(): Promise<void> {
 
 
-        if (this.serverGroup.timeout === undefined) {
+        if (this.scheduleGroup.timeout === undefined) {
             return;
         }
 
         clearTimeout(this.timeoutHandler);
         this.alive_servers = [];
 
-        for (let i = 0; i < this.serverGroup.servers.length; i++) {
+        for (let i = 0; i < this.scheduleGroup.servers.length; i++) {
 
-            const server = this.serverGroup.servers[i];
+            const server = this.scheduleGroup.servers[i];
 
-            if (await test_connection(server.server)) {
+            if (await test_connection(server.location)) {
 
                 this.alive_servers.push(server);
 
@@ -57,31 +115,31 @@ abstract class LinearScheduler extends AbstractServerScheduler {
             }, 10 * 1000)
         } else {
 
-            this.timeoutHandler = this.serverGroup.timeout ? setTimeout(() => {
+            this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
                 this.updateAlive();
             },
-                Math.max(this.serverGroup.timeout, 60 * 3) * 1000) : undefined;
+                Math.max(this.scheduleGroup.timeout, 60 * 3) * 1000) : undefined;
         }
 
     }
-    add(server: Server): void {
-        this.serverGroup.servers.push(server);
+    add(server: ScheduableServer): void {
+        this.scheduleGroup.servers.push(server);
         this.updateAlive();
     }
 
-    remove(server: Server): void {
-        const index = this.serverGroup.servers.findIndex((s) => s.id === server.id);
+    remove(server: ScheduableServer): void {
+        const index = this.scheduleGroup.servers.findIndex((s) => s.id === server.id);
         if (index !== -1) {
-            this.serverGroup.servers.splice(index, 1);
+            this.scheduleGroup.servers.splice(index, 1);
         }
         this.updateAlive();
     }
 
-    forEach(fn: (server: Server) => void): void {
+    forEach(fn: (server: ScheduableServer) => void): void {
         this.alive_servers.forEach(fn);
     }
 
-    abstract next(): Server;
+    abstract next(): ScheduableServer;
 
 }
 
@@ -89,15 +147,15 @@ abstract class LinearScheduler extends AbstractServerScheduler {
 class RoundRobinScheduler extends LinearScheduler {
 
 
-    constructor(serverGroup: ServerGroup) {
-        super(serverGroup);
+    constructor(scheduleGroup: ScheduleGroup) {
+        super(scheduleGroup);
 
 
     }
 
 
 
-    next(): Server {
+    next(): ScheduableServer {
         if (this.alive_servers.length === 0) {
             throw new Error("No server available");
         } else {
@@ -116,24 +174,24 @@ class WeightedRandomScheduler extends LinearScheduler {
     private totalWeight = 0;
 
 
-    constructor(serverGroup: ServerGroup) {
-        super(serverGroup);
+    constructor(scheduleGroup: ScheduleGroup) {
+        super(scheduleGroup);
         this.totalWeight = 0;
         this.updateAlive();
     }
 
     protected async updateAlive(): Promise<void> {
-        if (this.serverGroup.timeout === undefined) {
+        if (this.scheduleGroup.timeout === undefined) {
             return;
         }
         clearTimeout(this.timeoutHandler);
         this.alive_servers = [];
         this.totalWeight = 0;
-        for (let i = 0; i < this.serverGroup.servers.length; i++) {
+        for (let i = 0; i < this.scheduleGroup.servers.length; i++) {
 
-            const server = this.serverGroup.servers[i];
+            const server = this.scheduleGroup.servers[i];
 
-            if (await test_connection(server.server)) {
+            if (await test_connection(server.location)) {
 
                 this.alive_servers.push(server);
                 this.totalWeight += server.getWeight();
@@ -148,15 +206,15 @@ class WeightedRandomScheduler extends LinearScheduler {
             }, 10 * 1000)
         } else {
 
-            this.timeoutHandler = this.serverGroup.timeout ? setTimeout(() => {
+            this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
                 this.updateAlive();
             },
-                Math.max(this.serverGroup.timeout, 60 * 3) * 1000) : undefined;
+                Math.max(this.scheduleGroup.timeout, 60 * 3) * 1000) : undefined;
         }
 
     }
 
-    next(): Server {
+    next(): ScheduableServer {
         if (this.alive_servers.length === 0) {
             throw new Error("No server available");
         } else {
@@ -175,7 +233,7 @@ class WeightedRandomScheduler extends LinearScheduler {
 
 }
 
-
+// MIN_HEAP
 class ServerHeap {
 
 
@@ -186,9 +244,9 @@ class ServerHeap {
     }
 
 
-    private heap = Array<Server>();
+    private heap = Array<ScheduableServer>();
 
-    constructor(servers: Server[]) {
+    constructor(servers: ScheduableServer[]) {
         if (servers.length === 0) {
             throw new Error("No server available");
         } else {
@@ -204,13 +262,13 @@ class ServerHeap {
         }
     }
 
-    public add(server: Server): void {
+    public add(server: ScheduableServer): void {
         this._size++;
         this.heap.push(server);
         this.heapify_up(this._size - 1);
     }
 
-    public remove(server: Server): void {
+    public remove(server: ScheduableServer): void {
         const index = this.heap.findIndex((s) => s.id === server.id);
         if (index !== -1) {
             this.heap[index] = this.heap[this._size - 1];
@@ -220,7 +278,7 @@ class ServerHeap {
         }
     }
 
-    public pop(): Server {
+    public pop(): ScheduableServer {
         if (this._size === 0) {
             throw new Error("No server available");
         }
@@ -284,37 +342,37 @@ class ServerHeap {
 
 }
 
-abstract class MinHeapScheduler extends AbstractServerScheduler {
+abstract class MaxHeapScheduler extends AbstractServerScheduler {
     protected timeoutHandler?: NodeJS.Timeout;
     protected abstract updateAlive(): Promise<void>;
 
 }
 
-class MinRTTScheduler extends MinHeapScheduler {
-    private readonly serverGroup: ServerGroup;
+class MinRTTScheduler extends MaxHeapScheduler {
+    private readonly scheduleGroup: ScheduleGroup;
     private heap: ServerHeap;
     protected timeoutHandler?: NodeJS.Timeout;
-    constructor(serverGroup: ServerGroup) {
+    constructor(scheduleGroup: ScheduleGroup) {
         super();
-        this.serverGroup = serverGroup;
-        const servers: Server[] = serverGroup.servers;
+        this.scheduleGroup = scheduleGroup;
+        const servers: ScheduableServer[] = scheduleGroup.servers;
         this.heap = new ServerHeap(servers);
 
-        this.timeoutHandler = this.serverGroup.timeout ? setTimeout(() => {
+        this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
             this.updateAlive();
-        }, Math.max(this.serverGroup.timeout, 60 * 10) * 1000) : undefined;
+        }, Math.max(this.scheduleGroup.timeout, 60 * 10) * 1000) : undefined;
     }
 
     protected async updateAlive(): Promise<void> {
-        if (this.serverGroup.timeout === undefined) {
+        if (this.scheduleGroup.timeout === undefined) {
             return;
         }
         clearTimeout(this.timeoutHandler);
-        const servers: Server[] = this.serverGroup.servers;
-        const alive_servers: Server[] = [];
+        const servers: ScheduableServer[] = this.scheduleGroup.servers;
+        const alive_servers: ScheduableServer[] = [];
         for (let i = 0; i < servers.length; i++) {
             const server = servers[i];
-            if (await test_connection(server.server)) {
+            if (await test_connection(server.location)) {
                 alive_servers.push(server);
             }
         }
@@ -326,40 +384,91 @@ class MinRTTScheduler extends MinHeapScheduler {
             }, 10 * 1000)
         } else {
             this.heap = new ServerHeap(alive_servers);
-            this.timeoutHandler = this.serverGroup.timeout ? setTimeout(() => {
+            this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
                 this.updateAlive();
-            }, Math.max(this.serverGroup.timeout, 60 * 10) * 1000) : undefined;
+            }, Math.max(this.scheduleGroup.timeout, 60 * 10) * 1000) : undefined;
             this.heap = new ServerHeap(alive_servers);
         }
     }
 
-    next(): Server {
+    next(): ScheduableServer {
         return this.heap.pop();
     }
-    add(server: Server): void {
+    add(server: ScheduableServer): void {
         this.heap.add(server);
     }
-    remove(server: Server): void {
+    remove(server: ScheduableServer): void {
         this.heap.remove(server);
     }
-    forEach(fn: (server: Server) => void): never {
+    forEach(fn: (server: ScheduableServer) => void): never {
         throw new Error("Method not implemented.");
     }
 }
 
 
+const mapGetWeightFunction: {
+    [key in ScheduleStrategy]: (server: Server) => () => number
+} = {
+    "SINGLETON": (server: Server) => () => 1,
+    "ROUND_ROBIN": (server: Server) => () => 1,
+    "WEIGHTED_RANDOM": (server: Server) => () => server.weight,
+    "MIN_AVG_RTT": (server: Server) => () => -server.weight
+}
 
-// const servers:Server[] = []
-// for (let i = 0; i < 100; i++) {
-//     let weight = Math.floor(Math.random() * 1000);
-//     servers.push({ server: "http://localhost:8000", getWeight:()=>-weight, id: Symbol() });
-// }
 
 
-// const serverHeap:ServerHeap = new ServerHeap(servers);
+export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServerScheduler {
+    const scheduleGroup: ScheduleGroup = {
+        service: proxyRoute.service,
+        servers: proxyRoute.serviceProvider.map((server) => ({
+            ...server,
+            id: Symbol(),
+            getWeight: mapGetWeightFunction[proxyRoute.scheduleStrategy](server),
+            setWeight: (weight) => { server.weight = weight; }
+        })),
+        timeout: proxyRoute.timeout
+    }
+    switch (proxyRoute.scheduleStrategy) {
+        case "SINGLETON":
+            return new SINGLETONScheduler(scheduleGroup);
+        case "ROUND_ROBIN":
+            return new RoundRobinScheduler(scheduleGroup);
+        case "WEIGHTED_RANDOM":
+            return new WeightedRandomScheduler(scheduleGroup);
+        case "MIN_AVG_RTT":
+            return new MinRTTScheduler(scheduleGroup);
+        default:
+            throw new Error("Invalid schedule strategy");
+    }
+}
+
+const proxyConfig:ProxyConfig = [
+
+]
+
+const serviceProvider:Server[] = []
+
+for(let i=0; i< 100; i++){
+   serviceProvider.push({
+         location: `http://localhost:${i}`,
+         weight:Math.floor(Math.random()*1000)
+
+   })
+}
+
+proxyConfig.push({
+    service:"test",
+    serviceProvider,
+    scheduleStrategy:"MIN_AVG_RTT"
+})
+const scheduler = schedulerFactory(proxyConfig[0]);
+
+try{
+    while(true){
+        console.log(scheduler.next().weight);
+    }
+}catch(e){
+
+}
 
 
-// while(serverHeap.size()>0){
-//     let server = serverHeap.pop();
-//     console.log(server.getWeight());
-// }
