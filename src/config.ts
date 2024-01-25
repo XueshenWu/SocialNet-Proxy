@@ -32,7 +32,7 @@ const PROXY_CONFIG: ProxyConfig = [
                 weight: 1
             }
         ],
-        timeout: 1800,
+       
         scheduleStrategy: "MIN_AVG_RTT"
     }
 ]

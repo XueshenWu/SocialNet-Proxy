@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@types/winston": "^2.4.4",
+    "data-structure-typed": "^1.51.7",
     "jsonwebtoken": "^9.0.2",
     "winston": "^3.11.0"
   }

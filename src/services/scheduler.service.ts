@@ -4,6 +4,7 @@ import type { ProxyConfig } from "../types/config";
 import type { ScheduleStrategy } from "../types/config"
 import type { Server } from "../types/config";
 import {logger} from './logger.service';
+import {Heap} from "data-structure-typed"
 
 export abstract class AbstractServerScheduler {
 
@@ -260,12 +261,17 @@ class ServerHeap {
         return this._size;
     }
 
-
+    public forEach(fn: (server: ScheduableServer) => void): void {
+        for (let i = 0; i < this._size; i++) {
+            fn(this.heap[i]);
+        }
+    }
     private heap = Array<ScheduableServer>();
 
     constructor(servers: ScheduableServer[]) {
+        this.heap = [];
         if (servers.length === 0) {
-            throw new Error("No server available");
+            throw new Error("Constructor Error: No servers provided");
         } else {
             this._size = servers.length;
             this.heap = servers;
@@ -274,14 +280,14 @@ class ServerHeap {
     }
 
     private buildHeap(): void {
-        for (let i = Math.floor(this._size / 2); i >= 0; i--) {
-            this.heapfy_down(i);
+        for (let i = Math.floor(this._size / 2) - 1; i >= 0; i--) {
+            this.heapify_down(i);
         }
     }
 
     public add(server: ScheduableServer): void {
+        this.heap[this._size] = server;
         this._size++;
-        this.heap.push(server);
         this.heapify_up(this._size - 1);
     }
 
@@ -291,18 +297,23 @@ class ServerHeap {
             this.heap[index] = this.heap[this._size - 1];
             this._size--;
             this.heapify_up(index);
-            this.heapfy_down(index);
+            this.heapify_down(index);
         }
     }
 
     public pop(): ScheduableServer {
+
         if (this._size === 0) {
             throw new Error("No server available");
         }
         const server = this.heap[0];
+
+
         this.heap[0] = this.heap[this._size - 1];
+        this.heap[this._size - 1];
+        delete this.heap[this._size - 1];
         this._size--;
-        this.heapfy_down(0);
+        this.heapify_down(0);
         return server;
     }
 
@@ -320,36 +331,25 @@ class ServerHeap {
         }
     }
 
-    private heapfy_down(index: number): void {
-        const left = index * 2 + 1;
-        const right = index * 2 + 2;
-        if (left >= this._size) {
-            return;
+    
+    private heapify_down(index: number): void {
+        const left = 2 * index + 1;
+        const right = 2 * index + 2;
+        let max = index;
+        if (left < this._size && this.heap[left].getWeight() > this.heap[max].getWeight()) {
+            max = left;
         }
-        if (right >= this._size) {
-            if (this.heap[left].getWeight() > this.heap[index].getWeight()) {
-                const temp = this.heap[left];
-                this.heap[left] = this.heap[index];
-                this.heap[index] = temp;
-                this.heapfy_down(left);
-            }
-        } else {
-            if (this.heap[left].getWeight() > this.heap[right].getWeight()) {
-                if (this.heap[left].getWeight() > this.heap[index].getWeight()) {
-                    const temp = this.heap[left];
-                    this.heap[left] = this.heap[index];
-                    this.heap[index] = temp;
-                    this.heapfy_down(left);
-                }
-            } else {
-                if (this.heap[right].getWeight() > this.heap[index].getWeight()) {
-                    const temp = this.heap[right];
-                    this.heap[right] = this.heap[index];
-                    this.heap[index] = temp;
-                    this.heapfy_down(right);
-                }
-            }
+        if (right < this._size && this.heap[right].getWeight() > this.heap[max].getWeight()) {
+            max = right;
         }
+        if (max !== index) {
+            const temp = this.heap[max];
+            this.heap[max] = this.heap[index];
+            this.heap[index] = temp;
+            this.heapify_down(max);
+        }
+
+
     }
 
 
@@ -367,8 +367,15 @@ abstract class MaxHeapScheduler extends AbstractServerScheduler {
 
 class MinRTTScheduler extends MaxHeapScheduler {
     private readonly scheduleGroup: ScheduleGroup;
-    private heap: ServerHeap;
+    public heap: ServerHeap;
     protected timeoutHandler?: NodeJS.Timeout;
+
+
+    getSize():number{
+        return this.heap.size();
+    }
+
+
     constructor(scheduleGroup: ScheduleGroup) {
         super();
         this.scheduleGroup = scheduleGroup;
@@ -410,18 +417,25 @@ class MinRTTScheduler extends MaxHeapScheduler {
             this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
                 this.updateAlive();
             }, Math.max(this.scheduleGroup.timeout, 60*3) * 1000) : undefined;
-            this.heap = new ServerHeap(alive_servers);
         }
     }
 
     next(): { server: string, profile: (stat: number) => void } {
-        const server = this.heap.pop();
+
+
+        
+
+        const scheduable_server = this.heap.pop();
+
+        const heap = this.heap;
+        
         return {
-            server: server.location,
+            server: scheduable_server.location,
             profile: (stat: number) => {
-                server.serveTime++;
-                server.setWeight((server.weight + stat + 1) / (server.serveTime + 1));
-                this.heap.add(server);
+                scheduable_server.serveTime++;
+                scheduable_server.setWeight((scheduable_server.weight + stat + 1) / (scheduable_server.serveTime + 1));
+                
+                heap.add(scheduable_server);
             }
         }
     }
@@ -431,8 +445,8 @@ class MinRTTScheduler extends MaxHeapScheduler {
     remove(server: ScheduableServer): void {
         this.heap.remove(server);
     }
-    forEach(fn: (server: ScheduableServer) => void): never {
-        throw new Error("Method not implemented.");
+    forEach(fn: (server: ScheduableServer) => void): void {
+        this.heap.forEach(fn)
     }
 }
 
@@ -474,19 +488,84 @@ export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServe
     }
 }
 
-// const proxyConfig: ProxyConfig = [
+const proxyConfig: ProxyConfig = [
 
-// ]
+]
 
-// const serviceProvider: Server[] = []
+const serviceProvider: Server[] = []
 
-// for (let i = 0; i < 100; i++) {
-//     serviceProvider.push({
-//         location: `http://localhost:${i}`,
-//         weight: Math.floor(Math.random() * 1000)
+for (let i = 0; i < 5; i++) {
+    serviceProvider.push({
+        location: `http://localhost:${i}`,
+        weight: Math.floor(Math.random() * 1000)
 
-//     })
+    })
+}
+
+// class ScheduableServerImpl implements ScheduableServer {
+//     id: symbol;
+//     location: string;
+//     weight: number;
+//     getWeight: () => number;
+//     setWeight: (weight: number) => void;
+//     serveTime: number;
+
+//     constructor(location: string, weight: number) {
+//         this.id = Symbol();
+//         this.location = location;
+//         this.weight = weight;
+//         this.getWeight = () => this.weight;
+//         this.setWeight = (weight) => { this.weight = weight; };
+//         this.serveTime = 0;
+//     }
 // }
+
+// FIXME: This doesn't work
+const heap:ServerHeap =  new ServerHeap(serviceProvider.map(
+    (server)=>({
+        ...server,
+        id: Symbol(),
+        getWeight: ()=>-server.weight,
+        setWeight: (weight)=>{server.weight = weight},
+        serveTime: 0
+    })
+))
+
+
+
+const test2= async ()=>{
+    try{
+        while(true){
+    
+            const server = heap.pop();
+    
+            console.log(`pop server ${server.location} weight ${server.getWeight()}`)
+            console.log('\n')
+            console.log('old weight: '+server.weight)
+            const newWeight = Math.floor(Math.random() * 10000)+server.weight
+            console.log(`new weight ${newWeight}`)
+            server.setWeight( newWeight);
+            console.log(`push server ${server.location} weight ${server.getWeight()}`)
+            heap.add(server);
+            heap.forEach((_server)=>{
+                console.log(`location: ${_server.location}, weight: ${_server.getWeight()}`)
+            })
+            console.log('-'.repeat(20)+"\n\n\n")
+            await new Promise((resolve)=>{setTimeout(resolve, 1000)})
+           
+        }
+    }catch(e){
+        console.log(e)
+    }
+}
+
+
+test2();
+
+
+
+
+
 
 // proxyConfig.push({
 //     service: "test",
@@ -498,14 +577,20 @@ export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServe
 // try {
 //     while (true) {
 //         const {server, profile} = scheduler.next();
-//         console.log(`Request to ${server}`);
+//         console.log(`Request to ${server}\n\n\n`);
 //         profile(Math.floor(Math.random() * 1000));
 //         await new Promise((resolve) => {
-//             setTimeout(resolve, 300);
+//             setTimeout(resolve, 1000);
+//         });
+   
+//         (scheduler as MinRTTScheduler).forEach((server)=>{
+//             console.log(`current shceduables: ${server.location}`)
 //         })
+       
+        
 //     }
 // } catch (e) {
-
+//     console.log(e)
 // }
 // }
 
