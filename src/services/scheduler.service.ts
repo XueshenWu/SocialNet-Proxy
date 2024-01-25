@@ -6,6 +6,27 @@ import type { Server } from "../types/config";
 import {logger} from './logger.service';
 import {Heap} from "data-structure-typed"
 
+
+
+class CustomWeightScheduableServer implements ScheduableServer {
+    id: symbol;
+    location: string;
+    weight: number;
+    getWeight: () => number;
+    setWeight: (weight: number) => void;
+    serveTime: number;
+
+    constructor(location: string, getWeight:(server:CustomWeightScheduableServer)=>()=>number) {
+        this.id = Symbol();
+        this.location = location;
+        this.weight = 0;
+        this.getWeight = getWeight(this);
+        this.setWeight = (weight) => { this.weight = weight; };
+        this.serveTime = 0;
+    }
+}
+
+
 export abstract class AbstractServerScheduler {
 
 
@@ -365,7 +386,7 @@ abstract class MaxHeapScheduler extends AbstractServerScheduler {
 
 }
 
-class MinRTTScheduler extends MaxHeapScheduler {
+class MinAVGRTTScheduler extends MaxHeapScheduler {
     private readonly scheduleGroup: ScheduleGroup;
     public heap: ServerHeap;
     protected timeoutHandler?: NodeJS.Timeout;
@@ -380,6 +401,8 @@ class MinRTTScheduler extends MaxHeapScheduler {
         super();
         this.scheduleGroup = scheduleGroup;
         const servers: ScheduableServer[] = scheduleGroup.servers;
+       
+        
         this.heap = new ServerHeap(servers);
 
 
@@ -422,19 +445,32 @@ class MinRTTScheduler extends MaxHeapScheduler {
 
     next(): { server: string, profile: (stat: number) => void } {
 
-
+     
         
 
         const scheduable_server = this.heap.pop();
-
+        // console.log('-'.repeat(20))
+        // console.log('\n')
+        // console.log(`pop server ${scheduable_server.location} weight ${scheduable_server.getWeight()}`)
+        // console.log('\n')
+        // console.log("All Other servers")
+        // this.heap.forEach((server)=>{
+        //     console.log(`location: ${server.location}, weight: ${server.getWeight()}`)
+        // })
+        // console.log('\n')
+        // console.log('-'.repeat(20))
+       
         const heap = this.heap;
-        
         return {
             server: scheduable_server.location,
             profile: (stat: number) => {
                 scheduable_server.serveTime++;
-                scheduable_server.setWeight((scheduable_server.weight + stat + 1) / (scheduable_server.serveTime + 1));
-                
+                // console.log(`old weight: ${scheduable_server.getWeight()}`)
+                const newWeight = scheduable_server.weight + stat
+                // console.log(`new weight ${newWeight}`)
+                scheduable_server.setWeight(newWeight);
+                // console.log(`after setting weight ${scheduable_server.getWeight()}`)
+
                 heap.add(scheduable_server);
             }
         }
@@ -451,13 +487,20 @@ class MinRTTScheduler extends MaxHeapScheduler {
 }
 
 
+
+class MinAccumulativeRTTScheduler extends MinAVGRTTScheduler {
+
+}
+
+
 const mapGetWeightFunction: {
-    [key in ScheduleStrategy]: (server: Server) => () => number
+    [key in ScheduleStrategy]: (server: CustomWeightScheduableServer) => () => number
 } = {
     "SINGLETON": (server: Server) => () => 1,
     "ROUND_ROBIN": (server: Server) => () => 1,
     "WEIGHTED_RANDOM": (server: Server) => () => server.weight,
-    "MIN_AVG_RTT": (server: Server) => () => -server.weight
+    "MIN_AVG_RTT": (server: CustomWeightScheduableServer) => () => server.serveTime<1?0:-(server.weight+50)/(server.serveTime+50),
+    "MIN_ACC_RTT": (server: CustomWeightScheduableServer) => () => -server.weight
 }
 
 
@@ -465,13 +508,7 @@ const mapGetWeightFunction: {
 export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServerScheduler {
     const scheduleGroup: ScheduleGroup = {
         service: proxyRoute.service,
-        servers: proxyRoute.serviceProvider.map((server) => ({
-            ...server,
-            id: Symbol(),
-            getWeight: mapGetWeightFunction[proxyRoute.scheduleStrategy](server),
-            setWeight: (weight) => { server.weight = weight; },
-            serveTime: 0
-        })),
+        servers: proxyRoute.serviceProvider.map((server) => new CustomWeightScheduableServer(server.location,mapGetWeightFunction[proxyRoute.scheduleStrategy])),
         timeout: proxyRoute.timeout
     }
     switch (proxyRoute.scheduleStrategy) {
@@ -482,85 +519,64 @@ export function schedulerFactory(proxyRoute: ProxyConfig[number]): AbstractServe
         case "WEIGHTED_RANDOM":
             return new WeightedRandomScheduler(scheduleGroup);
         case "MIN_AVG_RTT":
-            return new MinRTTScheduler(scheduleGroup);
+            return new MinAVGRTTScheduler(scheduleGroup);
+        case "MIN_ACC_RTT":
+            return new MinAccumulativeRTTScheduler(scheduleGroup);
         default:
             throw new Error("Invalid schedule strategy");
     }
 }
 
-const proxyConfig: ProxyConfig = [
+// const proxyConfig: ProxyConfig = [
 
-]
+// ]
 
-const serviceProvider: Server[] = []
+// const serviceProvider: Server[] = []
 
-for (let i = 0; i < 5; i++) {
-    serviceProvider.push({
-        location: `http://localhost:${i}`,
-        weight: Math.floor(Math.random() * 1000)
+// for (let i = 0; i < 5; i++) {
+//     serviceProvider.push({
+//         location: `http://localhost:${i}`,
+//         weight: Math.floor(Math.random() * 100)
 
-    })
-}
+//     })
+// }
 
-// class ScheduableServerImpl implements ScheduableServer {
-//     id: symbol;
-//     location: string;
-//     weight: number;
-//     getWeight: () => number;
-//     setWeight: (weight: number) => void;
-//     serveTime: number;
 
-//     constructor(location: string, weight: number) {
-//         this.id = Symbol();
-//         this.location = location;
-//         this.weight = weight;
-//         this.getWeight = () => this.weight;
-//         this.setWeight = (weight) => { this.weight = weight; };
-//         this.serveTime = 0;
+
+// const heap:ServerHeap =  new ServerHeap(serviceProvider.map(
+//     (server)=>new CustomWeightScheduableServer(server.location, server.weight, (server)=>()=>-server.weight)
+// ))
+
+
+
+// const test2= async ()=>{
+//     try{
+//         while(true){
+    
+//             const server = heap.pop();
+    
+//             console.log(`pop server ${server.location} weight ${server.getWeight()}`)
+//             console.log('\n')
+//             console.log('old weight: '+server.weight)
+//             const newWeight = Math.floor(Math.random() * 10000)+server.weight
+//             console.log(`new weight ${newWeight}`)
+//             server.setWeight( newWeight);
+//             console.log(`push server ${server.location} weight ${server.getWeight()}`)
+//             heap.add(server);
+//             heap.forEach((_server)=>{
+//                 console.log(`location: ${_server.location}, weight: ${_server.getWeight()}`)
+//             })
+//             console.log('-'.repeat(20)+"\n\n\n")
+//             await new Promise((resolve)=>{setTimeout(resolve, 1000)})
+           
+//         }
+//     }catch(e){
+//         console.log(e)
 //     }
 // }
 
-// FIXME: This doesn't work
-const heap:ServerHeap =  new ServerHeap(serviceProvider.map(
-    (server)=>({
-        ...server,
-        id: Symbol(),
-        getWeight: ()=>-server.weight,
-        setWeight: (weight)=>{server.weight = weight},
-        serveTime: 0
-    })
-))
 
-
-
-const test2= async ()=>{
-    try{
-        while(true){
-    
-            const server = heap.pop();
-    
-            console.log(`pop server ${server.location} weight ${server.getWeight()}`)
-            console.log('\n')
-            console.log('old weight: '+server.weight)
-            const newWeight = Math.floor(Math.random() * 10000)+server.weight
-            console.log(`new weight ${newWeight}`)
-            server.setWeight( newWeight);
-            console.log(`push server ${server.location} weight ${server.getWeight()}`)
-            heap.add(server);
-            heap.forEach((_server)=>{
-                console.log(`location: ${_server.location}, weight: ${_server.getWeight()}`)
-            })
-            console.log('-'.repeat(20)+"\n\n\n")
-            await new Promise((resolve)=>{setTimeout(resolve, 1000)})
-           
-        }
-    }catch(e){
-        console.log(e)
-    }
-}
-
-
-test2();
+// test2();
 
 
 
@@ -575,16 +591,19 @@ test2();
 // const scheduler = schedulerFactory(proxyConfig[0]);
 // const test = async () =>{
 // try {
+//     let iteration = 0;
 //     while (true) {
+//         iteration++;
 //         const {server, profile} = scheduler.next();
 //         console.log(`Request to ${server}\n\n\n`);
-//         profile(Math.floor(Math.random() * 1000));
+        
+//         profile(Math.random() * 1000*iteration);
 //         await new Promise((resolve) => {
-//             setTimeout(resolve, 1000);
+//             setTimeout(resolve, 100);
 //         });
    
 //         (scheduler as MinRTTScheduler).forEach((server)=>{
-//             console.log(`current shceduables: ${server.location}`)
+//             console.log(`current shceduables: ${server.location}, weight: ${server.getWeight()}`)
 //         })
        
         

@@ -10,7 +10,7 @@ import type {Server} from './config.d.ts';
 type ScheduableServer = Server & {
     id: symbol;
     getWeight: () => number;
-    setWeight: (number) => void;
+    setWeight: (val:number) => void;
     serveTime: number;
 }
 

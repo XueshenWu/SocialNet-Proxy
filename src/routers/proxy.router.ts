@@ -7,7 +7,7 @@ import authGate from '../services/authgate.middleware';
 
 const proxyRouter = express.Router();
 
-proxyRouter.use(authGate);
+// proxyRouter.use(authGate);
 
 const proxyRoutes = new Map<string, AbstractServerScheduler>();
 
@@ -18,9 +18,9 @@ PROXY_CONFIG.forEach((config) => {
 })
 
 
-proxyRouter.all('*', express.json(),(req, res) => {
+proxyRouter.all('*', express.json(),async (req, res) => {
 
-    console.log(`@router: request body: ${JSON.stringify(req.body)}`)
+   
 
     const service = req.path.split('/')[1];
     const scheduler = proxyRoutes.get(service);
@@ -30,14 +30,14 @@ proxyRouter.all('*', express.json(),(req, res) => {
             const target = `${server}/${req.path.split('/').slice(2).join('/')}`;
             const method = req.method;
 
-            const start = process.hrtime();
+            const start = Date.now();
 
             if (method === "OPTION") {
                 res.status(404).end();
 
             } else {
                 try{
-                    relay_json(req, res, target, method as "GET" | "POST" | "PUT" | "DELETE");
+                    await relay_json(req, res, target, method as "GET" | "POST" | "PUT" | "DELETE");
                 }catch(e){
                     
                     res.status(502).end()
@@ -46,8 +46,11 @@ proxyRouter.all('*', express.json(),(req, res) => {
             }
 
 
-            const end = process.hrtime(start);
-            profile(end[0])
+            const end = Date.now();
+            const time_ms = end - start;
+            console.log(`Request to ${target} took ${time_ms}ms`)
+           
+            profile(time_ms);
 
         }
     }

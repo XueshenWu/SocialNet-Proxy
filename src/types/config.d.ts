@@ -1,5 +1,5 @@
 
-type ScheduleStrategy = "SINGLETON" | "ROUND_ROBIN" | "MIN_AVG_RTT" | "WEIGHTED_RANDOM"
+type ScheduleStrategy = "SINGLETON" | "ROUND_ROBIN" | "MIN_AVG_RTT" | "WEIGHTED_RANDOM" |"MIN_ACC_RTT";
 
 type Server = {
 
