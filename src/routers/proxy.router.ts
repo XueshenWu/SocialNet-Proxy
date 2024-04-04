@@ -4,18 +4,25 @@ import { PROXY_CONFIG } from '../config';
 import { schedulerFactory } from '../services/scheduler.service';
 import {relay_json} from '../services/proxytunnel.service';
 import authGate from '../services/authgate.middleware';
+import { logger } from '../services/logger.service';
 
 const proxyRouter = express.Router();
 
-// proxyRouter.use(authGate);
+;
 
 const proxyRoutes = new Map<string, AbstractServerScheduler>();
+
+
 
 PROXY_CONFIG.forEach((config) => {
     const shceduler: AbstractServerScheduler = schedulerFactory(config);
 
     proxyRoutes.set(config.service, shceduler);
+
+
 })
+
+
 
 
 proxyRouter.all('*', express.json(),async (req, res) => {
@@ -23,11 +30,19 @@ proxyRouter.all('*', express.json(),async (req, res) => {
    
 
     const service = req.path.split('/')[1];
-    const scheduler = proxyRoutes.get(service);
-    if (scheduler) {
-        const { server, profile } = scheduler.next();
-        if (server) {
-            const target = `${server}/${req.path.split('/').slice(2).join('/')}`;
+
+    // const scheduler = proxyRoutes.get(service);
+
+    if (true) {
+    
+        // const { server, profile } = scheduler.next();
+        
+        const server = 'http://127.0.0.1:8000'
+      
+        if (true || server) {
+            console.log(req.path)
+            const target = `${server}${req.path.split('/').join('/')}`;
+            console.log(target)
             const method = req.method;
 
             const start = Date.now();
@@ -50,7 +65,7 @@ proxyRouter.all('*', express.json(),async (req, res) => {
             const time_ms = end - start;
             console.log(`Request to ${target} took ${time_ms}ms`)
            
-            profile(time_ms);
+            // profile(time_ms);
 
         }
     }

@@ -5,15 +5,15 @@ import {relay_stream} from '../services/proxytunnel.service';
 
 const fileRouter = express.Router();
 
-fileRouter.use(authGate);
+// fileRouter.use(authGate);
 
 fileRouter.all('/:bucket/:key', express.raw({
     type: () => true,
     limit: '10mb'
 
 }),(req, res) => {
-
-    const target = `${FILE_CONFIG.path}/${req.params.bucket}/${req.params.key}`
+    const timestamp = Math.floor(new Date().getTime()/1000)
+    const target = `${FILE_CONFIG.path}/${req.params.bucket}/${req.params.key??timestamp}`
     const method = req.method
     
     if (method === "OPTION") {

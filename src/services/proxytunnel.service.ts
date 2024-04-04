@@ -24,7 +24,7 @@ export async function relay_stream(req: Request, resp: Response, target: string,
 
 
 
-
+        
 
 
         const status = target_response.status;
@@ -64,12 +64,13 @@ export async function relay_json(req: Request, resp: Response, target: string, m
 
 
         const status = target_response.status;
-
+       
 
 
         if (status >= 200 && status < 300) {
             try {
                 const json = await target_response.json();
+                
                 resp.json(json);
             } catch (e) {
 
@@ -84,6 +85,7 @@ export async function relay_json(req: Request, resp: Response, target: string, m
             resp.status(status).end();
         }
     } catch (e) {
+        console.log(e)
         resp.status(502).end();
     }
 }

@@ -5,7 +5,7 @@ const TOKEN_CONFIG: TokenConfig = {
     auth: {
         SECRET: "auth_secret",
         expire_seconds: 60 * 30,
-        location:"http://localhost:3004/auth",
+        location:"http://127.0.0.1:8000/auth/login",
        
     },
     refresh: {
@@ -13,7 +13,7 @@ const TOKEN_CONFIG: TokenConfig = {
         expire_seconds: 60 * 60 * 24 * 3,
     },
     signup:{
-        location: "http://localhost:3004/signup"
+        location: "http://127.0.0.1:8000/auth/register"
     }
 }
 
@@ -22,18 +22,12 @@ const PROXY_CONFIG: ProxyConfig = [
         service: "api",
         serviceProvider: [
             {
-                location: "http://localhost:3001",
-                weight: 1
-            },{
-                location: "http://localhost:3002",
-                weight: 1
-            },{
-                location: "http://localhost:3003",
+                location: "http://127.0.0.1:8000",
                 weight: 1
             }
         ],
        
-        scheduleStrategy: "MIN_ACC_RTT",
+        scheduleStrategy: "SINGLETON",
         timeout: 1000,
     }
 ]

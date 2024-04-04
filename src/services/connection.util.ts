@@ -4,6 +4,7 @@ export async function test_connection(url:string):Promise<boolean>{
             method: "GET"
         
         });
+      
         return 200 <= response.status && response.status < 300;
     }catch(e){
         return false;

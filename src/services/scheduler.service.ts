@@ -67,6 +67,7 @@ class SINGLETONScheduler extends AbstractServerScheduler {
 
     constructor(scheduleGroup: ScheduleGroup) {
         super();
+        logger.info('singleton scheduler started')
         this.scheduleGroup = scheduleGroup;
         this.server = scheduleGroup.servers[0];
         this.timeoutHandler = this.scheduleGroup.timeout ? setTimeout(() => {
@@ -75,7 +76,9 @@ class SINGLETONScheduler extends AbstractServerScheduler {
     }
 
     next(): { server: string, profile: (stat: number) => void } {
+        
         const server = this.server;
+        logger.info(`next: ${server}`)
         return { server: server.location, profile: (stat: number) => { server.serveTime++ } };
     }
 
