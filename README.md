@@ -1,53 +1,55 @@
-# SocialNet File Server
+# SocialNet Proxy
 
-A lightweight, high-performance file server with AWS S3 storage backend and Redis caching layer, designed to handle media uploads and downloads for the SocialNet application.
+A lightweight reverse proxy server that serves as the central API gateway for the SocialNet application, routing requests between the frontend, backend API, and file server with built-in authentication and load balancing capabilities.
 
 ## 🚀 Tech Stack
 
 - **Express.js 4.18** - Fast, unopinionated web framework for Node.js
 - **TypeScript** - Type-safe development
-- **AWS SDK v3** - Cloud storage integration with Amazon S3
-- **Redis 4.6** - In-memory caching for fast file retrieval
+- **JWT (jsonwebtoken)** - Token-based authentication
 - **Winston 3.11** - Professional logging
 - **CORS** - Cross-origin resource sharing support
+- **data-structure-typed** - Advanced data structures for scheduling
 
 ## 🏗️ Architecture
 
-### Storage Strategy
+### Reverse Proxy Pattern
 
-**Two-Tier Storage System:**
-1. **Remote Storage (AWS S3)** - Persistent cloud storage for all files
-2. **Local Cache (Redis)** - Fast in-memory cache with automatic expiration
+The proxy acts as a single entry point for all client requests, routing them to appropriate backend services:
 
-**Cache Flow:**
 ```
-Upload:   Client → Server → S3 → Redis Cache
-Download: Client → Server → Redis (if cached) → S3 (if cache miss) → Redis Cache
-Delete:   Client → Server → S3 → Redis Invalidation
+Client (Frontend)
+       ↓
+   Proxy Server (Port 3701)
+       ↓
+   ┌───┴───┬────────┐
+   ↓       ↓        ↓
+Auth    Backend   File
+Routes   API     Server
 ```
 
 ### Key Features
 
-- **Automatic Caching**: Files are cached in Redis after upload or first retrieval
-- **Smart Expiration**: Configurable TTL (Time To Live) for cached files
-- **MIME Type Handling**: Efficient MIME type encoding/decoding
-- **Graceful Shutdown**: Proper cleanup of connections on server close
-- **File Size Limit**: 10MB upload limit (configurable)
+- **Unified API Gateway**: Single entry point for all services
+- **Request Routing**: Intelligent routing to backend services
+- **Authentication Proxy**: Handles login/signup/logout flows
+- **File Proxy**: Routes file operations to dedicated file server
+- **Load Balancing**: Built-in scheduler with multiple strategies (planned)
+- **Request Timing**: Logs response times for performance monitoring
 
 ## 📋 Prerequisites
 
 Before you begin, ensure you have:
 - Node.js (version 16 or higher)
 - npm or yarn
-- AWS Account with S3 access
-- Redis server (local or remote)
-- AWS credentials configured
+- Backend API server running (default: http://127.0.0.1:8000)
+- File server running (default: http://localhost:9876)
 
 ## 🛠️ Installation
 
 1. Navigate to the project directory:
 ```bash
-cd SocialNet-FileServer-main/fserver
+cd SocialNet-Proxy-main
 ```
 
 2. Install dependencies:
@@ -55,26 +57,22 @@ cd SocialNet-FileServer-main/fserver
 npm install
 ```
 
-3. Set up environment variables:
-Create a `.env` file in the `fserver` directory:
-```env
-# Redis Configuration
-REDIS_URL=redis://localhost:6379
-REDIS_DB=0
-REDIS_MAX_MEMORY=100mb
-EXPIRE_TIME=60
+3. Configure the proxy settings:
+Edit `src/config.ts` to match your environment:
+```typescript
+const TOKEN_CONFIG: TokenConfig = {
+    auth: {
+        location: "http://127.0.0.1:8000/auth/login",
+        // ... other settings
+    },
+    signup: {
+        location: "http://127.0.0.1:8000/auth/register"
+    }
+}
 
-# AWS Configuration (use environment variables or AWS credentials file)
-AWS_REGION=ca-central-1
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
-```
-
-4. Ensure AWS credentials are configured:
-```bash
-# Option 1: Environment variables (already in .env)
-# Option 2: AWS credentials file (~/.aws/credentials)
-# Option 3: IAM role (if running on EC2)
+const FILE_CONFIG: FileConfig = {
+    path: "http://localhost:9876"
+}
 ```
 
 ## 🚦 Running the Server
@@ -84,7 +82,7 @@ AWS_SECRET_ACCESS_KEY=your-secret-key
 npm start
 ```
 
-The server will start at `http://localhost:9876`
+The proxy server will start at `http://192.168.196.10:3701`
 
 ### Production Mode
 ```bash
@@ -92,168 +90,351 @@ The server will start at `http://localhost:9876`
 npx tsc
 
 # Run compiled JavaScript
-node src/server.js
+node src/rpcontroller.js
 ```
 
-## 🌐 API Endpoints
+## 🌐 API Routes
 
-### Health Check
+### Authentication Routes (`/auth`)
+
+All authentication requests are proxied to the backend API server.
+
+#### Login
 ```http
-POST /
+POST /auth/login
+Content-Type: application/json
+
+{
+  "identity": "user@example.com",
+  "identityType": "email",
+  "password": "password123"
+}
 ```
-Returns 200 OK to verify server is running.
 
-### Upload File
+**Response:**
+- `200 OK` - Login successful
+- `401 Unauthorized` - Invalid credentials
+- `400 Bad Request` - Invalid request format
+
+#### Signup
 ```http
-POST /:bucket/:key
-Content-Type: <mime-type>
-Body: <binary-data>
+POST /auth/signup
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+**Response:**
+- `201 Created` - Account created successfully
+- `400 Bad Request` - Invalid request or email already exists
+
+#### Logout
+```http
+POST /auth/logout
+```
+
+**Response:**
+- `205 Reset Content` - Logout successful
+
+#### Token Refresh
+```http
+POST /auth/refresh
+Headers:
+  X-Auth-Token: <auth-token>
+  X-Refresh-Token: <refresh-token>
+```
+
+**Response:**
+- `200 OK` - Returns new tokens in headers
+- `401 Unauthorized` - Invalid tokens
+
+### File Routes (`/file`)
+
+File operations are proxied to the file server with stream handling.
+
+#### Upload/Download/Delete File
+```http
+GET/POST/PUT/DELETE /file/:bucket/:key
 ```
 
 **Parameters:**
-- `bucket` - S3 bucket name
-- `key` - Unique file identifier
+- `bucket` - Storage bucket name
+- `key` - File identifier
 
-**Headers:**
-- `Content-Type` - MIME type of the file
-
-**Example:**
+**Example - Upload:**
 ```bash
-curl -X POST http://localhost:9876/my-bucket/user123/avatar.png \
+curl -X POST http://192.168.196.10:3701/file/my-bucket/user123/avatar.png \
   -H "Content-Type: image/png" \
   --data-binary @avatar.png
 ```
 
-**Response:**
-- `200 OK` - File uploaded successfully
-- `500 Error` - Upload failed
-
-### Download File
-```http
-GET /:bucket/:key
+**Example - Download:**
+```bash
+curl http://192.168.196.10:3701/file/my-bucket/user123/avatar.png -o avatar.png
 ```
 
-**Parameters:**
-- `bucket` - S3 bucket name
-- `key` - File identifier
+**Upload Limit:** 10MB
+
+### API Routes (`/api`)
+
+All API requests are proxied to the backend service.
+
+```http
+GET/POST/PUT/DELETE /api/*
+```
 
 **Example:**
 ```bash
-curl http://localhost:9876/my-bucket/user123/avatar.png -o avatar.png
+# Get user profile
+curl http://192.168.196.10:3701/api/users/profile
+
+# Create a post
+curl -X POST http://192.168.196.10:3701/api/posts \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello World", "content": "My first post"}'
 ```
 
-**Response:**
-- `200 OK` - Returns file with appropriate Content-Type header
-- `404 Not Found` - File doesn't exist
-
-**Caching Behavior:**
-- First request: Retrieves from S3, caches in Redis
-- Subsequent requests: Serves from Redis cache (much faster)
-
-### Delete File
-```http
-DELETE /:bucket/:key
-```
-
-**Parameters:**
-- `bucket` - S3 bucket name
-- `key` - File identifier
-
-**Example:**
-```bash
-curl -X DELETE http://localhost:9876/my-bucket/user123/avatar.png
-```
-
-**Response:**
-- `200 OK` - File deleted successfully
-- `500 Error` - Deletion failed
+All requests to `/api/*` are forwarded to `http://127.0.0.1:8000` with the same path and method.
 
 ## 📁 Project Structure
 
 ```
-fserver/
-├── src/
-│   ├── server.ts           # Main Express server
-│   ├── remote-storage.ts   # AWS S3 integration
-│   ├── local-cache.ts      # Redis caching layer
-│   ├── mimeutil.ts         # MIME type utilities
-│   ├── logger.ts           # Winston logger configuration
-│   ├── local-storage.ts    # Local storage (unused)
-│   └── test.ts             # Testing utilities
-├── logs/                   # Log files directory
-├── package.json            # Dependencies and scripts
-├── tsconfig.json           # TypeScript configuration
-└── test.py                 # Python test script
+src/
+├── rpcontroller.ts           # Main proxy server
+├── config.ts                 # Configuration (endpoints, tokens)
+├── routers/
+│   ├── auth.router.ts        # Authentication routes
+│   ├── file.router.ts        # File proxy routes
+│   └── proxy.router.ts       # Backend API proxy routes
+├── services/
+│   ├── proxytunnel.service.ts    # Request relay functions
+│   ├── token.service.ts          # JWT token management
+│   ├── scheduler.service.ts      # Load balancing scheduler
+│   ├── authgate.middleware.ts    # Authentication middleware
+│   ├── logger.service.ts         # Winston logger
+│   └── connection.util.ts        # Connection utilities
+└── types/
+    └── config.ts             # TypeScript type definitions
 ```
 
 ## 🔧 Configuration
 
 ### Server Configuration
-- **Port**: 9876 (hardcoded in `server.ts`)
-- **Upload Limit**: 10MB (configurable in Express middleware)
-- **CORS**: Enabled for all origins
 
-### Redis Configuration
-Environment variables:
-- `REDIS_URL` - Redis connection URL (default: `redis://localhost:6379`)
-- `REDIS_DB` - Redis database number (default: 0)
-- `REDIS_MAX_MEMORY` - Maximum memory for Redis (default: 100mb)
-- `EXPIRE_TIME` - Cache expiration time in seconds (default: 60)
+**Host & Port:**
+- Default: `192.168.196.10:3701`
+- Configure in `src/rpcontroller.ts`
 
-### AWS S3 Configuration
-- **Region**: ca-central-1 (configurable in `remote-storage.ts`)
-- **Authentication**: Uses AWS SDK default credential chain
+**CORS Settings:**
+```typescript
+{
+  origin: '*',           // Allow all origins (configure for production)
+  methods: 'GET,POST',   // Allowed HTTP methods
+  credentials: true      // Allow cookies
+}
+```
 
-### Supported MIME Types
-- `application/json`
-- `application/octet-stream`
-- `application/xml`
-- `text/plain`
-- `text/html`
-- `video/mp4`
-- `image/jpeg`
-- `image/png`
-- `image/gif`
-- `image/webp`
+### Backend Services
 
-## 📊 Performance Optimization
+Configure backend service endpoints in `src/config.ts`:
 
-### Caching Strategy
-- **Cache Hit**: ~1-5ms response time
-- **Cache Miss**: ~100-300ms response time (depends on S3 latency)
-- **Automatic Expiration**: Configurable TTL prevents cache bloat
+**Authentication:**
+- Login endpoint: `http://127.0.0.1:8000/auth/login`
+- Signup endpoint: `http://127.0.0.1:8000/auth/register`
 
-### Memory Management
-- Redis `maxmemory` policy ensures controlled memory usage
-- LRU eviction policy for cache entries
-- Configurable cache size via `REDIS_MAX_MEMORY`
+**API Server:**
+- Base URL: `http://127.0.0.1:8000`
+- Timeout: 1000ms
+
+**File Server:**
+- Base URL: `http://localhost:9876`
+
+### JWT Token Configuration
+
+```typescript
+TOKEN_CONFIG = {
+  auth: {
+    SECRET: "auth_secret",
+    expire_seconds: 1800  // 30 minutes
+  },
+  refresh: {
+    SECRET: "refresh_secret",
+    expire_seconds: 259200  // 3 days
+  }
+}
+```
+
+**⚠️ Security Warning:** Change default secrets in production!
+
+## 🔀 Request Flow
+
+### Authentication Flow
+```
+1. Client → POST /auth/login
+2. Proxy → Forwards to Backend API
+3. Backend → Validates credentials
+4. Backend → Returns success/failure
+5. Proxy → Returns response to client
+```
+
+### API Request Flow
+```
+1. Client → GET/POST /api/users/profile
+2. Proxy → Extracts service name from path
+3. Proxy → Routes to http://127.0.0.1:8000/users/profile
+4. Backend → Processes request
+5. Proxy → Returns JSON response to client
+```
+
+### File Request Flow
+```
+1. Client → POST /file/bucket/key
+2. Proxy → Streams request to http://localhost:9876/bucket/key
+3. File Server → Handles upload/download
+4. Proxy → Streams response back to client
+```
+
+## 📊 Performance Features
+
+### Request Timing
+All requests are timed and logged:
+```
+Request to http://127.0.0.1:8000/api/users took 45ms
+```
+
+### Stream Handling
+- File operations use streaming for memory efficiency
+- No file size limitations from proxy (limited by file server)
+- Binary data preserved through proxy
+
+### Load Balancing (Planned)
+The scheduler service includes support for:
+- **SINGLETON**: Single server (current implementation)
+- **ROUND_ROBIN**: Distribute requests evenly (planned)
+- **WEIGHTED**: Weight-based distribution (planned)
+- **LEAST_CONNECTIONS**: Route to least busy server (planned)
 
 ## 📝 Logging
 
+### Winston Logger
+Logs are written to:
+- `combined.log` - All logs
+- `error.log` - Error logs only
+
 ### Log Levels
-The server uses Winston for structured logging:
-- **info**: Server events, cache hits/misses
-- **error**: Error conditions
+- Info: Server events, request routing
+- Warn: Authentication attempts
+- Error: Failed requests, exceptions
 
-### Log Files
-Logs are written to the `logs/` directory with automatic rotation.
-
-### Example Log Output
+### Example Logs
 ```
-info: Server started at http://localhost:9876
-info: RemoteStorage initialized
-info: LocalCache initialized
-info: GET my-bucket/user123/avatar.png
-info: Cache hit for user123/avatar.png
+Server started
+POST /auth/login - {identity: "user@example.com"}
+Request to http://127.0.0.1:8000/auth/login took 120ms
 ```
 
-## 🧪 Testing
+## 🔐 Security Considerations
 
-A Python test script is included for basic functionality testing:
+### Production Checklist
+- [ ] Change JWT secrets from defaults
+- [ ] Configure specific CORS origins (not `*`)
+- [ ] Add rate limiting middleware
+- [ ] Implement request validation
+- [ ] Enable HTTPS (use reverse proxy like Nginx)
+- [ ] Add authentication middleware to sensitive routes
+- [ ] Implement request/response logging
+- [ ] Set up monitoring and alerts
 
+### Authentication Middleware
+The `authgate.middleware.ts` can be enabled on routes:
+```typescript
+// Example: Protect file routes
+fileRouter.use(authGate);
+```
+
+### CORS Configuration
+For production, specify allowed origins:
+```typescript
+const corsOptions = {
+  origin: ['https://socialnet.com', 'https://app.socialnet.com'],
+  methods: 'GET,POST,PUT,DELETE',
+  credentials: true
+};
+```
+
+## 🚀 Deployment
+
+### Docker Deployment
+
+Create a `Dockerfile`:
+```dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+RUN npx tsc
+
+EXPOSE 3701
+
+CMD ["node", "src/rpcontroller.js"]
+```
+
+Build and run:
 ```bash
-python test.py
+docker build -t socialnet-proxy .
+docker run -p 3701:3701 socialnet-proxy
 ```
 
-For manual testing, use the provided `test.ts` file or HTTP clients like curl, Postman, or HTTPie.
+### Docker Compose
 
+```yaml
+version: '3.8'
+services:
+  proxy:
+    build: .
+    ports:
+      - "3701:3701"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - backend
+      - fileserver
+  
+  backend:
+    image: socialnet-backend
+    ports:
+      - "8000:8000"
+  
+  fileserver:
+    image: socialnet-fileserver
+    ports:
+      - "9876:9876"
+```
+
+### Nginx Reverse Proxy
+
+```nginx
+server {
+    listen 80;
+    server_name api.socialnet.com;
+
+    location / {
+        proxy_pass http://localhost:3701;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # WebSocket support (if needed)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
